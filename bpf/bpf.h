@@ -35,6 +35,8 @@ struct message {
     s32 err;
     s32 task_tgid;
     s32 task_ptgid;
+    s32 task_uid;
+    s32 task_puid;
     u8 task_comm[STR_MAX_LENGTH];
     u8 task_pcomm[STR_MAX_LENGTH];
     u8 filename[STR_MAX_LENGTH];

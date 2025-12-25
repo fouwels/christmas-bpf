@@ -79,29 +79,12 @@ print fmt: "filename: 0x%08lx, argv: 0x%08lx, envp: 0x%08lx", ((unsigned long)(R
 
 // Function to clear a message
 static void zero_message(struct message *m) {
-    int i, j;
 
-    // Clear scalar fields
-    m->type = 0;
-    m->err = 0;
-    m->task_tgid = 0;
-    m->task_ptgid = 0;
-    m->len_arguments = 0;
-
-    for (i = 0; i < STR_MAX_LENGTH; i++) {
-        m->filename[i] = 0;
-    }
-    for (i = 0; i < STR_MAX_LENGTH; i++) {
-        m->task_comm[i] = 0;
-    }
-    for (i = 0; i < STR_MAX_LENGTH; i++) {
-        m->task_pcomm[i] = 0;
-    }
-
-    for (i = 0; i < EXEC_MAX_ARGUMENTS; i++) {
-        for (j = 0; j < STR_MAX_LENGTH; j++) {
-            m->arguments[i][j] = 0;
-        }
+    int i;
+    // Treat the struct as an array of bytes
+    unsigned char *p = (unsigned char *)m;
+    for (i = 0; i < sizeof(struct message); i++) {
+        p[i] = 0;
     }
 }
 
@@ -109,6 +92,8 @@ static void zero_message(struct message *m) {
 static int write_message_task(struct message *m) {
     struct task_struct *task;
     struct task_struct *real_parent;
+    struct cred *cred = NULL;
+    kuid_t uid = {};
     int error = 0;
 
     task = (struct task_struct *)bpf_get_current_task();
@@ -134,18 +119,47 @@ static int write_message_task(struct message *m) {
         return error;
     }
 
-    // parent task process pid (TGID)
-    error = bpf_core_read(&m->task_ptgid, sizeof(m->task_ptgid), &real_parent->tgid);
+    // cred
+    error = bpf_core_read(&cred, sizeof(cred), &task->real_cred);
     if (error < 0) {
-        LOG_DEBUG("failed: bpf_core_read: &real_parent->tgid: %i", error);
+        LOG_DEBUG("failed: bpf_core_read: &task->real_cred: %i", error);
         return error;
     }
 
-    // parent task comm (process name)
-    error = bpf_core_read_str(&m->task_pcomm, sizeof(m->task_pcomm), &real_parent->comm);
-    if (error < 0) {
-        LOG_DEBUG("failed: bpf_core_read: &real_parent->comm: %i", error);
-        return error;
+    if (cred) {
+        bpf_core_read(&uid, sizeof(m->task_uid), &cred->uid);
+        m->task_uid = uid.val;
+    }
+
+    // if we got a parent (we always should... but hey ho?)
+    if (real_parent) {
+
+        // parent task process pid (TGID)
+        error = bpf_core_read(&m->task_ptgid, sizeof(m->task_ptgid), &real_parent->tgid);
+        if (error < 0) {
+            LOG_DEBUG("failed: bpf_core_read: &real_parent->tgid: %i", error);
+            return error;
+        }
+
+        // parent task comm (process name)
+        error = bpf_core_read_str(&m->task_pcomm, sizeof(m->task_pcomm), &real_parent->comm);
+        if (error < 0) {
+            LOG_DEBUG("failed: bpf_core_read: &real_parent->comm: %i", error);
+            return error;
+        }
+
+        // cred
+        cred = NULL;
+        error = bpf_core_read(&cred, sizeof(cred), &real_parent->real_cred);
+        if (error < 0) {
+            LOG_DEBUG("failed: bpf_core_read: &real_parent->real_cred): %i", error);
+            return error;
+        }
+
+        if (cred) {
+            bpf_core_read(&uid, sizeof(m->task_uid), &cred->uid);
+            m->task_puid = uid.val;
+        }
     }
 
     return 0;

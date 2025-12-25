@@ -121,6 +121,8 @@ type BpfMessage struct {
 	Err          int32
 	Task_Tgid    int32 // userspace PID
 	Task_Ptgid   int32 // userspace PPID
+	Task_Uid     int32 // userspace user id
+	Task_Puid    int32 // userspace user id
 	Task_Comm    [BPF_STR_MAX_LENGTH]uint8
 	Task_PComm   [BPF_STR_MAX_LENGTH]uint8
 	Filename     [BPF_STR_MAX_LENGTH]uint8
@@ -139,7 +141,7 @@ func handleEvent(e []byte) {
 	switch m.Type {
 	case 1:
 		{
-			log.Printf("type:%v err:%v ptgid:[%v]%v tgid:[%v]%v filename:%v", m.Type, m.Err, string(m.Task_PComm[:]), m.Task_Ptgid, string(m.Task_Comm[:]), m.Task_Tgid, string(m.Filename[:]))
+			log.Printf("type:%v err:%v ptgid:[%v]%v tgid:[%v]%v puid:%v uid:%v filename:[%v]", m.Type, m.Err, m.Task_Ptgid, string(m.Task_PComm[:]), m.Task_Tgid, string(m.Task_Comm[:]), m.Task_Puid, m.Task_Uid, string(m.Filename[:]))
 		}
 	case 2, 3:
 		{
@@ -155,7 +157,7 @@ func handleEvent(e []byte) {
 				arguments += "]"
 			}
 
-			log.Printf("type:%v err:%v ptgid:[%v]%v tgid:[%v]%v filename:%v arguments:%v", m.Type, m.Err, string(m.Task_PComm[:]), m.Task_Ptgid, string(m.Task_Comm[:]), m.Task_Tgid, string(m.Filename[:]), arguments)
+			log.Printf("type:%v err:%v ptgid:[%v]%v tgid:[%v]%v puid:%v uid:%v filename:[%v] arguments:%v", m.Type, m.Err, m.Task_Ptgid, string(m.Task_PComm[:]), m.Task_Tgid, string(m.Task_Comm[:]), m.Task_Puid, m.Task_Uid, string(m.Filename[:]), arguments)
 		}
 	default:
 		{

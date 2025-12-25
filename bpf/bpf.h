@@ -1,13 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2024 Kaelan Thijs Fouwels <kaelan.thijs@fouwels.com>
 
-#define DEBUG
+// Toggle on our own debug mode
+#define USR_DEBUG
 
 // Define error codes for ourselves
 #define STR_MAX_LENGTH 128    // max length we want to allocate per string
 #define EXEC_MAX_ARGUMENTS 32 // max arguments we will read for a process
 
-#define ERR_bpf_get_current_pid_tgid 20000001
-
-#ifdef DEBUG
+#ifdef USR_DEBUG
+// Writes to trace log, see makefile util-trace for reading
 #define LOG_DEBUG(msg, arg)   \
     {                         \
         bpf_printk(msg, arg); \
@@ -16,24 +18,28 @@
 #define LOG_DEBUG(msg, arg) {};
 #endif
 
+// message type to userspace
 enum Type
 {
     UNKNOWN,
     SCHED_PROCESS_EXEC,
     SYS_ENTER_EXECVE,
+    SYS_ENTER_EXECVEAT,
 };
 
+// output message to user space
 struct message
 {
     s32 type;
     s32 err;
-    s32 tgid;
-    s32 ptgid;
+    s32 task_tgid;
+    s32 task_ptgid;
     u8 filename[STR_MAX_LENGTH];
     u8 arguments[EXEC_MAX_ARGUMENTS][STR_MAX_LENGTH];
     u32 len_arguments;
 };
 
+// bpf magic struct defining ring buffer
 struct
 {
     __uint(type, BPF_MAP_TYPE_RINGBUF);

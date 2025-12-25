@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2024 Kaelan Thijs Fouwels <kaelan.thijs@fouwels.com>
+
 SUDO ?= /usr/bin/sudo
 SETCAP ?= /sbin/setcap
 CLANG ?= /usr/bin/clang

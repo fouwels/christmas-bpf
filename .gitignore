@@ -1,1 +1,3 @@
 build
+bpf/vmlinux.h
+.vscode

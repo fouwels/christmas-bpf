@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL v2 */
+// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2024 Kaelan Thijs Fouwels <kaelan.thijs@fouwels.com>
 
+// Notes:
 /*
-
 Parent Process
       |
       | fork() / clone()
@@ -67,13 +68,6 @@ format:
         field:const char *const * envp; offset:32;      size:8; signed:0;
 
 print fmt: "filename: 0x%08lx, argv: 0x%08lx, envp: 0x%08lx", ((unsigned long)(REC->filename)), ((unsigned long)(REC->argv)), ((unsigned long)(REC->envp))
-
-user@localhost:~/w/bpf$ sudo bpftrace -l tracepoint:syscalls:sys_enter_execve -v
-tracepoint:syscalls:sys_enter_execve
-    int __syscall_nr
-    const char * filename
-    const char *const * argv
-    const char *const * envp
 */
 
 // See https://kernel.googlesource.com/pub/scm/linux/kernel/git/nico/archive/+/v0.97/include/linux/errno.h for errno mapping
@@ -91,8 +85,8 @@ static void zero_message(struct message *m)
     // Clear scalar fields
     m->type = 0;
     m->err = 0;
-    m->tgid = 0;
-    m->ptgid = 0;
+    m->task_tgid = 0;
+    m->task_ptgid = 0;
     m->len_arguments = 0;
 
     for (i = 0; i < STR_MAX_LENGTH; i++)
@@ -109,7 +103,45 @@ static void zero_message(struct message *m)
     }
 }
 
+// Write common task values in to our message
+static int write_message_task(struct message *m)
+{
+    struct task_struct *task;
+    struct task_struct *real_parent;
+    int error = 0;
+
+    task = (struct task_struct *)bpf_get_current_task();
+
+    // task process pid (TGID)
+    error = bpf_probe_read_kernel(&m->task_tgid, sizeof(m->task_tgid), &task->tgid);
+    if (error < 0)
+    {
+        LOG_DEBUG("failed: bpf_probe_read_kernel: &task->tgid: %i", error);
+        return error;
+    }
+
+    // parent task
+    error = bpf_probe_read_kernel(&real_parent, sizeof(real_parent), &task->real_parent);
+    if (error < 0)
+    {
+        LOG_DEBUG("failed: bpf_probe_read_kernel: &task->real_parent: %i", error);
+        return error;
+    }
+
+    // parent task process pid (TGID)
+    error = bpf_probe_read_kernel(&m->task_ptgid, sizeof(m->task_ptgid), &real_parent->tgid);
+    if (error < 0)
+    {
+        LOG_DEBUG("failed: bpf_probe_read_kernel: &real_parent->tgid: %i", error);
+        return error;
+    }
+
+    return 0;
+}
+
 /*
+sudo bpftrace -l tracepoint:sched:sched_process_exec -v
+
 tracepoint:sched:sched_process_exec
     __data_loc char[] filename
     pid_t pid
@@ -119,8 +151,6 @@ SEC("tracepoint/sched/sched_process_exec")
 int monitor_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx)
 {
     struct message *m; // output message
-    struct task_struct *task;
-    struct task_struct *real_parent;
     int error = 0;
 
     /// Set Up
@@ -139,9 +169,19 @@ int monitor_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx)
     // type
     m->type = SCHED_PROCESS_EXEC;
 
+    /// Task Values
+    error = write_message_task(m);
+    if (error < 0)
+    {
+        LOG_DEBUG("failed: write_message_task: %i", error);
+        goto error;
+    }
+
     /// Context Values
 
     // task file name
+    // this is whack, the kernel gives you the pointer to the start of a data block, the offset from the start of that block,
+    // and the length to read: to read the file name.
     u32 data_loc_filename = ctx->__data_loc_filename;
     u16 data_loc_filename_offset = data_loc_filename & 0xFFFF;
     u16 data_loc_filename_len = data_loc_filename >> 16; // length of filename
@@ -154,31 +194,7 @@ int monitor_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx)
     error = bpf_probe_read_kernel_str(m->filename, data_loc_filename_len + 1, (&ctx->__data + data_loc_filename_offset));
     if (error < 0)
     {
-        goto error;
-    }
-
-    /// Task Values
-
-    task = (struct task_struct *)bpf_get_current_task();
-
-    // task process pid (TGID)
-    error = bpf_probe_read_kernel(&m->tgid, sizeof(m->tgid), &task->tgid);
-    if (error < 0)
-    {
-        goto error;
-    }
-
-    // parent task
-    error = bpf_probe_read_kernel(&real_parent, sizeof(real_parent), &task->real_parent);
-    if (error < 0)
-    {
-        goto error;
-    }
-
-    // parent task process pid (TGID)
-    error = bpf_probe_read_kernel(&m->ptgid, sizeof(m->ptgid), &real_parent->tgid);
-    if (error < 0)
-    {
+        LOG_DEBUG("failed: bpf_probe_read_kernel_str: &ctx->__data + data_loc_filename_offset: %i", error);
         goto error;
     }
 
@@ -193,17 +209,19 @@ error:
     return 0;
 }
 /*
+sudo bpftrace -l tracepoint:syscalls:sys_enter_execve -v
+
 tracepoint:syscalls:sys_enter_execve
     int __syscall_nr
     const char * filename
     const char *const * argv
     const char *const * envp
 */
-SEC("tracepoint/syscalls/sys_enter_execve")
-int monitor_syscall_sys_enter_execve(struct trace_event_raw_sys_enter *ctx)
+
+// combined implementation for SEC("tracepoint/syscalls/sys_enter_execve") and SEC("tracepoint/syscalls/sys_enter_execveat") attached below 
+static int monitor_syscall_sys_enter_exec_x(struct trace_event_raw_sys_enter *ctx, int type)
 {
     struct message *m; // output message
-    struct task_struct *task;
     int error = 0;
     int i = 0;
     char *pointer = NULL;
@@ -222,15 +240,28 @@ int monitor_syscall_sys_enter_execve(struct trace_event_raw_sys_enter *ctx)
     zero_message(m);
 
     // type
-    m->type = SYS_ENTER_EXECVE;
+    m->type = type;
+
+    /// Task Values
+    error = write_message_task(m);
+    if (error < 0)
+    {
+        goto error;
+    }
 
     /// Context Values
 
     // syscall arguments
-    // unsigned long *syscall_filename = ctx->args[0];
+    char *syscall_filename = (char *)ctx->args[0];
+    error = bpf_probe_read_user_str(m->filename, sizeof(m->filename), syscall_filename);
+    if (error < 0)
+    {
+        LOG_DEBUG("failed: bpf_probe_read_user_str: syscall_filename: %i", error);
+        goto error;
+    }
 
     char **syscall_argv = (char **)ctx->args[1]; // pointer to array of pointers to strings...
-    // unsigned long *syscall_envp = ctx->args[2];
+    // char **syscall_envp = (char **)ctx->args[2]; // same for env variables
 
     for (i = 0; i < EXEC_MAX_ARGUMENTS; i++)
     {
@@ -238,6 +269,7 @@ int monitor_syscall_sys_enter_execve(struct trace_event_raw_sys_enter *ctx)
         error = bpf_probe_read_user(&pointer, sizeof(pointer), &syscall_argv[i]);
         if (error < 0)
         {
+            LOG_DEBUG("failed: bpf_probe_read_user: &syscall_argv[i]: %i", error);
             goto error;
         }
         if (!pointer)
@@ -249,20 +281,11 @@ int monitor_syscall_sys_enter_execve(struct trace_event_raw_sys_enter *ctx)
         error = bpf_probe_read_user_str(m->arguments[i], sizeof(m->arguments[i]), pointer);
         if (error < 0)
         {
+            LOG_DEBUG("failed: bpf_probe_read_user_str: pointer: %i", error);
             goto error;
         }
 
         m->len_arguments++;
-    }
-
-    /// Task Values
-    task = (struct task_struct *)bpf_get_current_task();
-
-    // task process pid (TGID)
-    error = bpf_probe_read_kernel(&m->tgid, sizeof(m->tgid), &task->tgid);
-    if (error < 0)
-    {
-        goto error;
     }
 
 error:
@@ -275,5 +298,20 @@ error:
     bpf_ringbuf_submit(m, 0);
     return 0;
 }
+
+SEC("tracepoint/syscalls/sys_enter_execve")
+// https://man7.org/linux/man-pages/man2/execve.2.html
+int monitor_syscall_sys_enter_execve(struct trace_event_raw_sys_enter *ctx)
+{
+    return monitor_syscall_sys_enter_exec_x(ctx, SYS_ENTER_EXECVE);
+}
+// https://man7.org/linux/man-pages/man2/execveat.2.html
+// choose to ignore the additional "flags" over execve, for this.
+SEC("tracepoint/syscalls/sys_enter_execveat")
+int monitor_syscall_sys_enter_execveat(struct trace_event_raw_sys_enter *ctx)
+{
+    return monitor_syscall_sys_enter_exec_x(ctx, SYS_ENTER_EXECVEAT);
+}
+
 
 char _license[] SEC("license") = "GPL v2";

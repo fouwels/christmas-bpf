@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: MIT */
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2024 Kaelan Thijs Fouwels <kaelan.thijs@fouwels.com>
 
 package main
 
@@ -118,8 +119,8 @@ func run() error {
 type BpfMessage struct {
 	Type         int32
 	Err          int32
-	Tgid         int32 // userspace PID
-	Ptgid        int32 // userspace PPID
+	Task_Tgid    int32 // userspace PID
+	Task_Ptgid   int32 // userspace PPID
 	Filename     [BPF_STR_MAX_LENGTH]uint8
 	Arguments    [BPF_EXEC_MAX_ARGUMENTS][BPF_STR_MAX_LENGTH]uint8
 	LenArguments int32
@@ -136,9 +137,9 @@ func handleEvent(e []byte) {
 	switch m.Type {
 	case 1:
 		{
-			log.Printf("err:%v type:%v tgid:%v ptgid:%v filename:%v", m.Err, m.Type, m.Tgid, m.Ptgid, string(m.Filename[:]))
+			log.Printf("type:%v err:%v tgid:%v ptgid:%v filename:%v", m.Type, m.Err, m.Task_Tgid, m.Task_Ptgid, string(m.Filename[:]))
 		}
-	case 2:
+	case 2, 3:
 		{
 
 			arguments := ""
@@ -152,7 +153,7 @@ func handleEvent(e []byte) {
 				arguments += "]"
 			}
 
-			log.Printf("err:%v type:%v tgid:%v arguments:%v", m.Err, m.Type, m.Tgid, arguments)
+			log.Printf("type:%v err:%v tgid:%v ptgid:%v filename:%v arguments:%v", m.Type, m.Err, m.Task_Tgid, m.Task_Ptgid, string(m.Filename[:]), arguments)
 		}
 	default:
 		{

@@ -113,26 +113,26 @@ static int write_message_task(struct message *m)
     task = (struct task_struct *)bpf_get_current_task();
 
     // task process pid (TGID)
-    error = bpf_probe_read_kernel(&m->task_tgid, sizeof(m->task_tgid), &task->tgid);
+    error = bpf_core_read(&m->task_tgid, sizeof(m->task_tgid), &task->tgid);
     if (error < 0)
     {
-        LOG_DEBUG("failed: bpf_probe_read_kernel: &task->tgid: %i", error);
+        LOG_DEBUG("failed: bpf_core_read: &task->tgid: %i", error);
         return error;
     }
 
     // parent task
-    error = bpf_probe_read_kernel(&real_parent, sizeof(real_parent), &task->real_parent);
+    error = bpf_core_read(&real_parent, sizeof(real_parent), &task->real_parent);
     if (error < 0)
     {
-        LOG_DEBUG("failed: bpf_probe_read_kernel: &task->real_parent: %i", error);
+        LOG_DEBUG("failed: bpf_core_read: &task->real_parent: %i", error);
         return error;
     }
 
     // parent task process pid (TGID)
-    error = bpf_probe_read_kernel(&m->task_ptgid, sizeof(m->task_ptgid), &real_parent->tgid);
+    error = bpf_core_read(&m->task_ptgid, sizeof(m->task_ptgid), &real_parent->tgid);
     if (error < 0)
     {
-        LOG_DEBUG("failed: bpf_probe_read_kernel: &real_parent->tgid: %i", error);
+        LOG_DEBUG("failed: bpf_core_read: &real_parent->tgid: %i", error);
         return error;
     }
 
@@ -191,10 +191,10 @@ int monitor_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx)
         data_loc_filename_len = sizeof(m->filename) - 1;
     }
 
-    error = bpf_probe_read_kernel_str(m->filename, data_loc_filename_len + 1, (&ctx->__data + data_loc_filename_offset));
+    error = bpf_core_read_str(m->filename, data_loc_filename_len + 1, (&ctx->__data + data_loc_filename_offset));
     if (error < 0)
     {
-        LOG_DEBUG("failed: bpf_probe_read_kernel_str: &ctx->__data + data_loc_filename_offset: %i", error);
+        LOG_DEBUG("failed: bpf_core_read_str: &ctx->__data + data_loc_filename_offset: %i", error);
         goto error;
     }
 
@@ -253,10 +253,10 @@ static int monitor_syscall_sys_enter_exec_x(struct trace_event_raw_sys_enter *ct
 
     // syscall arguments
     char *syscall_filename = (char *)ctx->args[0];
-    error = bpf_probe_read_user_str(m->filename, sizeof(m->filename), syscall_filename);
+    error = bpf_core_read_user_str(m->filename, sizeof(m->filename), syscall_filename);
     if (error < 0)
     {
-        LOG_DEBUG("failed: bpf_probe_read_user_str: syscall_filename: %i", error);
+        LOG_DEBUG("failed: bpf_core_read_user_str: syscall_filename: %i", error);
         goto error;
     }
 
@@ -266,10 +266,10 @@ static int monitor_syscall_sys_enter_exec_x(struct trace_event_raw_sys_enter *ct
     for (i = 0; i < EXEC_MAX_ARGUMENTS; i++)
     {
         // follow pointer i to read string_pointer
-        error = bpf_probe_read_user(&pointer, sizeof(pointer), &syscall_argv[i]);
+        error = bpf_core_read_user(&pointer, sizeof(pointer), &syscall_argv[i]);
         if (error < 0)
         {
-            LOG_DEBUG("failed: bpf_probe_read_user: &syscall_argv[i]: %i", error);
+            LOG_DEBUG("failed: bpf_core_read_user: &syscall_argv[i]: %i", error);
             goto error;
         }
         if (!pointer)
@@ -278,10 +278,10 @@ static int monitor_syscall_sys_enter_exec_x(struct trace_event_raw_sys_enter *ct
         }
 
         // read string at string_pointer
-        error = bpf_probe_read_user_str(m->arguments[i], sizeof(m->arguments[i]), pointer);
+        error = bpf_core_read_user_str(m->arguments[i], sizeof(m->arguments[i]), pointer);
         if (error < 0)
         {
-            LOG_DEBUG("failed: bpf_probe_read_user_str: pointer: %i", error);
+            LOG_DEBUG("failed: bpf_core_read_user_str: pointer: %i", error);
             goto error;
         }
 

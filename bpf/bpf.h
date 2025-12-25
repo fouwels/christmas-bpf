@@ -18,9 +18,11 @@
 #define LOG_DEBUG(msg, arg) {};
 #endif
 
+#include "vmlinux.h"
+#include <bpf/bpf_helpers.h>
+
 // message type to userspace
-enum Type
-{
+enum Type {
     UNKNOWN,
     SCHED_PROCESS_EXEC,
     SYS_ENTER_EXECVE,
@@ -28,20 +30,20 @@ enum Type
 };
 
 // output message to user space
-struct message
-{
+struct message {
     s32 type;
     s32 err;
     s32 task_tgid;
     s32 task_ptgid;
+    u8 task_comm[STR_MAX_LENGTH];
+    u8 task_pcomm[STR_MAX_LENGTH];
     u8 filename[STR_MAX_LENGTH];
     u8 arguments[EXEC_MAX_ARGUMENTS][STR_MAX_LENGTH];
     u32 len_arguments;
 };
 
 // bpf magic struct defining ring buffer
-struct
-{
+struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 64 * 1024); // bytes
 } ringbuf SEC(".maps");
